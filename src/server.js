@@ -96,7 +96,8 @@ app.post('/v1/chat', async (req, res) => {
 
     // 3. LAYER: RETRIEVAL & GENERATION (JDIH / HC)
     if (clientApp === 'jdih') {
-      const result = await askJDIHQuestion(message);
+      const chatHistory = await getSessionHistory(sessionId, 6);
+      const result = await askJDIHQuestion(message, 4, chatHistory);
       const latencyMs = Date.now() - startTime;
 
       // 4. LAYER: RECORD PERSISTENCE & AUDIT LOGGING
@@ -209,7 +210,8 @@ app.post('/v1/chat/stream', async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    const { citations, stream } = await askJDIHQuestionStream(message);
+    const chatHistory = await getSessionHistory(sessionId, 6);
+    const { citations, stream } = await askJDIHQuestionStream(message, 4, chatHistory);
 
     // Kirim event meta (citations & intent) terlebih dahulu
     res.write(`data: ${JSON.stringify({ type: 'meta', intent: plan.intent, citations })}\n\n`);

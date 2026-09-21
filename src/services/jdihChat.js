@@ -7,13 +7,12 @@ import { generateEmbeddings, chatCompletion, chatCompletionStream } from './mist
  * 2. Cari top-K potongan pasal terdekat di PostgreSQL via cosine distance (<=>)
  * 3. Kirim potongan pasal + pertanyaan ke LLM Mistral
  */
-export async function askJDIHQuestion(userQuestion, limit = 4) {
+export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = []) {
   // 1. Generate embedding untuk pertanyaan user
   const [questionVector] = await generateEmbeddings([userQuestion]);
   const vectorStr = JSON.stringify(questionVector);
 
   // 2. Query ke PostgreSQL menggunakan cosine similarity operator (<=>)
-  // 1 - (embedding <=> questionVector) adalah cosine similarity (semakin mendekati 1 semakin mirip)
   const searchQuery = `
     SELECT 
       c.id,
@@ -37,35 +36,12 @@ export async function askJDIHQuestion(userQuestion, limit = 4) {
     };
   }
 
-  // 3. Susun Konteks Referensi dari potongan pasal yang ditemukan
   const contextText = relevantChunks
-    .map((chunk, idx) => {
-      return `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`;
-    })
+    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
     .join('\n\n---\n\n');
 
-  // 4. Susun System Prompt & User Message untuk LLM
-  const messages = [
-    {
-      role: 'system',
-      content: `Kamu adalah Asisten AI Resmi JDIH (Jaringan Dokumentasi dan Informasi Hukum) Perusahaan.
-Tugasmu adalah menjawab pertanyaan pengguna HANYA berdasarkan referensi peraturan dan ketentuan hukum perusahaan yang diberikan di bawah ini.
-
-Petunjuk Penting:
-1. Bersikaplah profesional, jelas, dan lugas.
-2. Selalu sebutkan dasar hukum, bab, pasal, atau nomor dokumen yang menjadi dasar jawabanmu (contoh: "Berdasarkan Pasal 15 Peraturan Perusahaan No. 01/2024...").
-3. Jika jawaban tidak ditemukan di dalam teks referensi, katakan dengan jujur bahwa informasi tersebut tidak tercantum dalam dokumen peraturan yang tersedia saat ini, jangan mengarang atau berhalusinasi.
-
-Berikut adalah teks referensi peraturan yang relevan:
-====================
-${contextText}
-====================`,
-    },
-    {
-      role: 'user',
-      content: userQuestion,
-    },
-  ];
+  // Format multi-turn messages
+  const messages = buildMessagesPayload(contextText, userQuestion, chatHistory);
 
   // 5. Generate jawaban menggunakan Mistral
   const answer = await chatCompletion(messages);
@@ -84,9 +60,9 @@ ${contextText}
 }
 
 /**
- * Streaming version of askJDIHQuestion
+ * Streaming version of askJDIHQuestion with Multi-Turn Memory
  */
-export async function askJDIHQuestionStream(userQuestion, limit = 4) {
+export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory = []) {
   const [questionVector] = await generateEmbeddings([userQuestion]);
   const vectorStr = JSON.stringify(questionVector);
 
@@ -119,32 +95,63 @@ export async function askJDIHQuestionStream(userQuestion, limit = 4) {
     .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
     .join('\n\n---\n\n');
 
-  const messages = [
-    {
-      role: 'system',
-      content: `Kamu adalah Asisten AI Resmi JDIH (Jaringan Dokumentasi dan Informasi Hukum) Perusahaan.
-Tugasmu adalah menjawab pertanyaan pengguna HANYA berdasarkan referensi peraturan dan ketentuan hukum perusahaan yang diberikan di bawah ini.
-
-Petunjuk Penting:
-1. Bersikaplah profesional, jelas, dan lugas.
-2. Selalu sebutkan dasar hukum, bab, pasal, atau nomor dokumen yang menjadi dasar jawabanmu (contoh: "Berdasarkan Pasal 15 Peraturan Perusahaan No. 01/2024...").
-3. Jika jawaban tidak ditemukan di dalam teks referensi, katakan dengan jujur bahwa informasi tersebut tidak tercantum dalam dokumen peraturan yang tersedia saat ini, jangan mengarang atau berhalusinasi.
-
-Berikut adalah teks referensi peraturan yang relevan:
-====================
-${contextText}
-====================`,
-    },
-    {
-      role: 'user',
-      content: userQuestion,
-    },
-  ];
-
+  // Format multi-turn messages
+  const messages = buildMessagesPayload(contextText, userQuestion, chatHistory);
   const stream = chatCompletionStream(messages);
 
   return {
     citations,
     stream,
   };
+}
+
+/**
+ * Helper to construct messages payload with System Prompt, Conversation History, and Current Question
+ */
+function buildMessagesPayload(contextText, userQuestion, chatHistory = []) {
+  const messages = [
+    {
+      role: 'system',
+      content: `Kamu adalah Asisten AI Resmi JDIH (Jaringan Dokumentasi dan Informasi Hukum) Perusahaan.
+Tugasmu adalah menjawab pertanyaan pengguna HANYA berdasarkan referensi peraturan dan ketentuan hukum perusahaan yang diberikan di bawah ini.
+
+Prinsip & Disiplin Menjawab (WAJIB DIPATUHI):
+1. LANDASAN HUKUM LITERAL (Strict Grounding):
+   - Jawab HANYA berdasarkan fakta dan klausa yang tertulis secara eksplisit dalam teks referensi.
+   - Selalu sebutkan nama dokumen, nomor keputusan, bab, dan pasal yang menjadi dasar jawabanmu.
+2. LARANGAN EKSTRAPOLASI & PERHITUNGAN ASUMSIF (Zero Math Hallucination):
+   - DILARANG mengarang rumus matematika, mengalikan, atau menjumlahkan angka (seperti masa kerja, denda, atau jatah hak) kecuali jika formula perhitungan tersebut TERTULIS SECARA EKSPLISIT di dalam pasal.
+   - Jika suatu hak atau kewajiban memiliki batas masa berlaku / ketentuan hangus (expiration) atau syarat periodik (per tahun berjalan), jangan berasumsi bahwa nilai tersebut dapat diakumulasikan.
+3. KONSISTENSI & PENALARAN PERCAKAPAN:
+   - Kamu mengingat konteks riwayat percakapan sebelumnya dalam sesi ini.
+   - Jika pengguna menegur, mengoreksi, atau menanyakan alasan pernyataanmu sebelumnya, akui dengan jujur dan sopan apabila jawaban sebelumnya mengandung asumsi/ekstrapolasi yang tidak berdasar pada dokumen, lalu luruskan kembali jawabanmu murni sesuai teks dokumen.
+4. BATASAN PENGETAHUAN (Honest Boundary):
+   - Jika suatu hal atau rincian spesifik TIDAK tertulis dalam teks referensi yang tersedia, nyatakan dengan jujur dan lugas bahwa peraturan perusahaan yang tersedia saat ini tidak mengatur hal tersebut. JANGAN membuat asumsi atau spekulasi.
+
+Berikut adalah teks referensi peraturan yang relevan:
+====================
+${contextText}
+====================`,
+    },
+  ];
+
+  // Sisipkan riwayat percakapan sebelumnya (Multi-Turn)
+  if (Array.isArray(chatHistory)) {
+    for (const turn of chatHistory) {
+      if (turn.user_message) {
+        messages.push({ role: 'user', content: turn.user_message });
+      }
+      if (turn.ai_response) {
+        messages.push({ role: 'assistant', content: turn.ai_response });
+      }
+    }
+  }
+
+  // Pertanyaan pengguna saat ini
+  messages.push({
+    role: 'user',
+    content: userQuestion,
+  });
+
+  return messages;
 }

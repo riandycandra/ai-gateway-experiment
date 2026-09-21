@@ -1,6 +1,8 @@
 import { api } from '../api.js';
 import { showToast } from '../components/modal.js';
 
+let currentSessionId = `sess_${Date.now()}`;
+
 export function renderPlaygroundPage(container) {
   container.innerHTML = `
     <div class="page">
@@ -9,18 +11,25 @@ export function renderPlaygroundPage(container) {
           <h2>Chat Playground</h2>
           <p>Test queries live against the AI Gateway, inspect reasoning intent, and view real citations.</p>
         </div>
+        <button class="btn" id="btnNewChat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          New Chat
+        </button>
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start;">
         <!-- Left: Chat Panel -->
         <div class="card" style="display: flex; flex-direction: column; height: 600px;">
           <div class="card-h">
-            <span class="card-t">Conversation</span>
-            <span class="badge green">Live API</span>
+            <div>
+              <span class="card-t">Conversation</span>
+              <span class="mono" id="lblSessionId" style="font-size: 11px; color: var(--fg-3); margin-left: 8px;">${currentSessionId}</span>
+            </div>
+            <span class="badge green">Multi-Turn Memory</span>
           </div>
           <div id="chatMessages" style="flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
             <div style="background: var(--panel-2); padding: 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
-              <strong>System:</strong> Silakan ajukan pertanyaan terkait peraturan perusahaan (JDIH) atau sapa asisten virtual.
+              <strong>System:</strong> Silakan ajukan pertanyaan terkait peraturan perusahaan (JDIH). Sesi ini memiliki ingatan konteks obrolan.
             </div>
           </div>
           <div style="padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px;">
@@ -44,6 +53,26 @@ export function renderPlaygroundPage(container) {
 
   const input = document.getElementById('chatInput');
   const btnSend = document.getElementById('btnSendChat');
+  const btnNew = document.getElementById('btnNewChat');
+
+  btnNew?.addEventListener('click', () => {
+    currentSessionId = `sess_${Date.now()}`;
+    const lbl = document.getElementById('lblSessionId');
+    if (lbl) lbl.textContent = currentSessionId;
+    const chatContainer = document.getElementById('chatMessages');
+    if (chatContainer) {
+      chatContainer.innerHTML = `
+        <div style="background: var(--panel-2); padding: 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+          <strong>System:</strong> Sesi baru dimulai (${currentSessionId}). Silakan ajukan pertanyaan baru.
+        </div>
+      `;
+    }
+    const inspector = document.getElementById('inspectorContent');
+    if (inspector) {
+      inspector.innerHTML = `<p style="color: var(--fg-3); font-size: 12.5px;">Kirim pesan di sebelah kiri untuk melihat detail eksekusi dan citations.</p>`;
+    }
+    showToast('Started new conversation session!');
+  });
 
   btnSend.addEventListener('click', () => handleSend());
   input.addEventListener('keydown', (e) => {
@@ -84,6 +113,7 @@ async function handleSend() {
       body: JSON.stringify({
         app: 'jdih',
         message,
+        session_id: currentSessionId,
         user_id: localStorage.getItem('userEmail') || 'dana@northwind.co',
       }),
     });
