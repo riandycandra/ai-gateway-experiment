@@ -3,6 +3,13 @@ import { showToast } from '../components/modal.js';
 
 let currentSessionId = `sess_${Date.now()}`;
 
+if (window.marked) {
+  window.marked.setOptions({
+    breaks: true, // enter biasa menjadi <br> bukan <p> baru
+    gfm: true,
+  });
+}
+
 export function renderPlaygroundPage(container) {
   container.innerHTML = `
     <div class="page">
@@ -100,7 +107,7 @@ async function handleSend() {
   // 2. Create AI bubble with streaming cursor
   const aiBubbleId = `ai_msg_${Date.now()}`;
   chatContainer.innerHTML += `
-    <div id="${aiBubbleId}" style="align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-width: 85%;">
+    <div id="${aiBubbleId}" class="markdown-content" style="align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-size: 13px; line-height: 1.55; max-width: 85%;">
       <span class="stream-text">Thinking & searching knowledge base...</span><span class="stream-cursor" style="display:inline-block; width:6px; height:14px; background:var(--brand); margin-left:3px; vertical-align:middle; animation:blink 0.8s infinite;"></span>
     </div>
   `;

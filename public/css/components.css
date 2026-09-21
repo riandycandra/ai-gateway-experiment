@@ -390,3 +390,73 @@ table.tbl td.strong {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+/* ---------------------------------------------------------------
+   Markdown Typography Reset (Compact & Clean Line Heights)
+--------------------------------------------------------------- */
+.markdown-content p {
+  margin: 0 0 8px 0;
+  line-height: 1.55;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content ul, 
+.markdown-content ol {
+  margin: 4px 0 8px 0;
+  padding-left: 20px;
+}
+
+.markdown-content li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+}
+
+.markdown-content h1, 
+.markdown-content h2, 
+.markdown-content h3, 
+.markdown-content h4 {
+  margin: 12px 0 6px 0;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.3;
+}
+
+.markdown-content h3 {
+  font-size: 14px;
+}
+
+.markdown-content h4 {
+  font-size: 13px;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+.markdown-content code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--brand);
+}
+
+.markdown-content pre {
+  background: #121212;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.markdown-content strong {
+  font-weight: 600;
+  color: #fff;
+}

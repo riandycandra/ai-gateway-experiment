@@ -192,7 +192,7 @@ function showDetailModal(log) {
       </div>
       <div style="margin-bottom: 14px;">
         <label class="lbl">AI Response</label>
-        <div style="background: #1a1a1a; padding: 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13.5px; line-height: 1.6;">
+        <div class="markdown-content" style="background: #1a1a1a; padding: 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13.5px; line-height: 1.55;">
           ${window.marked ? window.marked.parse(log.ai_response || '') : escapeHtml(log.ai_response)}
         </div>
       </div>
