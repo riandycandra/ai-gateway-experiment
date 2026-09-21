@@ -30,6 +30,8 @@ export async function askJDIHQuestion(userQuestion, limit = 4) {
 
   const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
 
+  console.log(relevantChunks);
+
   if (relevantChunks.length === 0) {
     return {
       answer: "Maaf, belum ada dokumen peraturan yang tersimpan di dalam basis pengetahuan JDIH.",
@@ -80,6 +82,7 @@ ${contextText}
       heading: c.heading,
       similarityScore: parseFloat(c.similarity).toFixed(4),
       snippet: c.chunk_text.slice(0, 150) + '...',
+      fullText: c.chunk_text,
     })),
   };
 }

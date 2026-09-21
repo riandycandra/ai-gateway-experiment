@@ -42,6 +42,37 @@ async function initDb() {
     `);
     console.log('✅ HNSW index created for cosine similarity.');
 
+    // 5. Create Chat Logs table (History, Observability & Auditing)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS chat_logs (
+        id SERIAL PRIMARY KEY,
+        session_id VARCHAR(100) NOT NULL,
+        app VARCHAR(50) NOT NULL,
+        user_id VARCHAR(100),
+        user_message TEXT NOT NULL,
+        ai_response TEXT NOT NULL,
+        intent VARCHAR(50),
+        citations JSONB,
+        latency_ms INT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Table "chat_logs" ready.');
+
+    // 6. Create Audit & Human Validation table (Evaluation & Feedback Loop)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audit_evaluations (
+        id SERIAL PRIMARY KEY,
+        chat_log_id INT REFERENCES chat_logs(id) ON DELETE CASCADE,
+        rating VARCHAR(20), -- 'thumbs_up', 'thumbs_down', 'flagged'
+        human_feedback TEXT,
+        llm_judge_score INT, -- 1 to 5
+        llm_judge_reasoning TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Table "audit_evaluations" ready.');
+
     console.log('🎉 Database initialization completed successfully!');
   } catch (error) {
     console.error('❌ Failed to initialize database:', error);

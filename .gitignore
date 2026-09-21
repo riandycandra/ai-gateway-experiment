@@ -32,3 +32,6 @@ pgdata/
 data/*.pdf
 data/*.txt
 !data/.gitkeep
+
+# Misc
+extract-dashboard-mockup.html
