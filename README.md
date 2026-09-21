@@ -1,8 +1,8 @@
-# Enterprise AI Gateway & RAG Engine
+# Enterprise AI Gateway, RAG & Evaluation Platform
 
-A modular AI Gateway and RAG (Retrieval-Augmented Generation) engine designed to integrate multi-tenant internal applications (e.g., Legal/JDIH documents and HR/HC systems) with LLMs.
+A modular multi-tenant AI Gateway, RAG (Retrieval-Augmented Generation) engine, and Evaluation platform built with **Node.js (Express)**, **PostgreSQL with `pgvector`**, and **Mistral AI (Embeddings & Chat)**.
 
-This project simulates a cost-effective, production-ready enterprise AI architecture using **Node.js (Express)**, **PostgreSQL with `pgvector`**, and **Mistral AI (Embeddings & Chat)**.
+Includes a Supabase-inspired **Dark Theme Admin Dashboard & Playground** served directly via Vanilla ES Modules for live observability, human validation, and LLM-as-a-Judge auditing.
 
 ---
 
@@ -22,7 +22,9 @@ This project simulates a cost-effective, production-ready enterprise AI architec
 +-------------------------------------------------------------------------+
 |                  AI Gateway (Node.js / Express API)                     |
 |                                                                         |
-|   POST /v1/chat  ---> [ Conditional Router & Auth ]                     |
+|   POST /v1/chat  ---> [ 1. Guardrail Pre-Check (L1 Adversarial Defense) ]|
+|                              |                                          |
+|                       [ 2. Reasoning Engine & Intent Planner ]          |
 |                              |                                          |
 |         +--------------------+--------------------+                     |
 |         | (app: 'jdih')                           | (app: 'hc')         |
@@ -31,36 +33,41 @@ This project simulates a cost-effective, production-ready enterprise AI architec
 |   - Embed query (mistral-embed)             - Function: get_leaves()    |
 |   - Cosine search (<=>) on pgvector         - Safe Read-Only Query      |
 |   - Strict legal prompt synthesis           - Structured result to LLM  |
-+---------|---------------------------------------------------------------+
-          |
-          v
-+-------------------------------------------------------------------------+
-|                             Data Layer                                  |
-|   +------------------------------------+   +------------------------+   |
-|   | PostgreSQL 16 + pgvector (Docker)  |   | Mistral AI API (Cloud) |   |
-|   | - Table: jdih_documents            |   | - mistral-embed        |   |
-|   | - Table: jdih_chunks (HNSW index)  |   | - open-mistral-7b      |   |
-|   +------------------------------------+   +------------------------+   |
-+-------------------------------------------------------------------------+
+|                              |                                          |
+|   +--------------------------+------------------------------+           |
+|   | 3. Observability, Session Persistence & Audit Logging   |           |
+|   |    - Saves to PostgreSQL table: chat_logs               |           |
++---|---------------------------------------------------------|-----------+
+    |                                                         |
+    v                                                         v
++-------------------------------------+   +-------------------------------+
+|       4. Evaluation Layer           |   |    5. Web UI & Playground     |
+| - Human Validation (thumbs/stars)   |   | - Supabase Dark Theme         |
+| - LLM-as-a-Judge (Faithfulness 1-5) |   | - Live Runs & Audit Table     |
+| - Table: audit_evaluations          |   | - Interactive Chat Playground |
++-------------------------------------+   +-------------------------------+
 ```
 
 ---
 
 ## 🚀 Key Features
 
-- **Multi-Tenant Routing:** Single entrypoint (`POST /v1/chat`) routing requests based on application context (`jdih` for RAG, `hc` for function calling).
-- **Structure-Aware Document Chunking:** Legal regulations are parsed by `BAB` and `Pasal` headings to preserve semantic continuity rather than naive character splitting.
-- **HNSW Vector Indexing:** Fast approximate nearest neighbor search powered by `pgvector` and cosine distance (`<=>`).
-- **Citation & Factuality Enforcement:** Answers explicitly reference document titles, article numbers, and similarity scores to eliminate hallucination.
-- **Rate-Limit Resilience:** Built-in retry mechanism with exponential backoff for external LLM API calls.
+- **Multi-Tenant Gateway:** Unified endpoint (`POST /v1/chat`) with intelligent routing for legal regulations (`jdih`), corporate HR (`hc`), and fast-path greetings (`0ms` latency).
+- **L1 Guardrails & Adversarial Defense:** Blocks prompt injections, jailbreaks, and system prompt leaks before hitting the LLM.
+- **Structure-Aware Document Chunking:** Preserves `BAB` and `Pasal` headings in legal PDFs to prevent context fragmentation.
+- **HNSW Vector Indexing:** Fast cosine distance (`<=>`) queries on 1024-dimensional vectors stored in `pgvector`.
+- **Full Observability & Logging:** Tracks latency, model parameters, user sessions, and retrieved citations in PostgreSQL.
+- **LLM-as-a-Judge Evaluation:** Automatic grading of AI answers on **Faithfulness** (anti-hallucination) and **Relevance** with a 1-5 score.
+- **Human-in-the-Loop Feedback:** Star ratings and auditor review notes integrated directly into the dashboard.
+- **Interactive Web Dashboard & Playground:** Modular Vanilla ES Modules interface accessible at `http://localhost:3000`.
 
 ---
 
 ## 🛠 Prerequisites
 
-Ensure you have the following installed on your system:
+Ensure you have the following installed on your machine:
 - **Node.js**: v20+ or v24+
-- **Docker & Docker Compose** (for PostgreSQL with `pgvector`)
+- **Docker & Docker Compose** (for PostgreSQL + `pgvector`)
 - **Mistral AI API Key**: Get a free API key at [console.mistral.ai](https://console.mistral.ai)
 
 ---
@@ -79,7 +86,7 @@ Copy the example configuration:
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and provide your Mistral API key:
+Edit `.env` with your settings:
 ```env
 MISTRAL_API_KEY=your_mistral_api_key_here
 PORT=3000
@@ -90,64 +97,64 @@ PG_PASSWORD=ai_password
 PG_DATABASE=ai_gateway
 ```
 
-### 3. Spin Up PostgreSQL + `pgvector`
-Start the vector database container in background:
+### 3. Spin Up PostgreSQL + `pgvector` Container
 ```bash
 docker compose up -d
 ```
 
 ### 4. Initialize Database Schema & Vector Extension
-Run the database migration script:
+Creates `jdih_documents`, `jdih_chunks`, `chat_logs`, and `audit_evaluations` tables:
 ```bash
 npm run init-db
 ```
 
 ### 5. Ingest Sample Legal Document
-Ingest sample company regulations into `pgvector`:
+Ingests sample company regulations into `pgvector` with HNSW indexing:
 ```bash
 npm run ingest-sample
 ```
 
-### 6. Start the API Server
+### 6. Start the Server
 ```bash
 npm start
 ```
-The server will run on `http://localhost:3000`.
+The server and dashboard will run on **`http://localhost:3000`**.
 
 ---
 
-## 📡 API Usage
+## 🖥 Web Dashboard & Playground
 
-### Endpoint: `POST /v1/chat`
+Open your browser to:
+👉 **`http://localhost:3000`**
 
-#### Request:
+1. Click **Sign in** on the login screen.
+2. **Overview**: Real-time stats on total queries, average latency, success rates, and blocked injections.
+3. **Runs & Audit**: Inspect every query transaction, inspect full retrieved citations, rate responses with 1-5 stars, or click **Evaluate** to trigger LLM-as-a-Judge.
+4. **Jobs**: Overview of registered knowledge tenants (`jdih` RAG and `hc` Tool Calling).
+5. **Playground**: Test questions interactively with live citation inspection in the right-hand panel.
+
+---
+
+## 📡 API Reference Summary
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/v1/chat` | `POST` | Core chat gateway with reasoning, guardrails, and logging |
+| `/v1/chat/logs` | `GET` | Fetches recent chat transactions joined with audit evaluations |
+| `/v1/chat/history/:sessionId` | `GET` | Retrieves multi-turn chat history for a session |
+| `/v1/analytics/stats` | `GET` | Aggregates gateway performance metrics (latency, success rate) |
+| `/v1/audit/feedback` | `POST` | Submits human auditor ratings (`thumbs_up`, `thumbs_down`, stars) |
+| `/v1/eval/judge` | `POST` | Triggers LLM-as-a-Judge faithfulness evaluation on a chat log |
+| `/health` | `GET` | Health check endpoint |
+
+### Example cURL Request:
 ```bash
 curl -X POST http://localhost:3000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{
     "app": "jdih",
-    "message": "Apa sanksinya kalau karyawan terlambat datang kerja ke kantor?"
+    "message": "Kalau mau nikah dapet jatah libur berapa hari?"
   }'
-```
-
-#### Response Example:
-```json
-{
-  "success": true,
-  "app": "jdih",
-  "data": {
-    "answer": "Berdasarkan Pasal 2 ayat 2 Peraturan Disiplin dan Cuti Karyawan 2024 (No. 04/PP/HR-LEGAL/2024), sanksi yang dikenakan terhadap karyawan yang melakukan keterlambatan melebihi 15 menit tanpa persetujuan tertulis dari atasan langsung sebanyak 3 kali dalam 1 bulan adalah Surat Peringatan Pertama (SP 1).",
-    "citations": [
-      {
-        "documentTitle": "Peraturan Disiplin dan Cuti Karyawan 2024",
-        "documentNumber": "04/PP/HR-LEGAL/2024",
-        "heading": "Pasal 2: Keterlambatan dan Presensi",
-        "similarityScore": "0.8282",
-        "snippet": "Pasal 2: Keterlambatan dan Presensi\n1. Karyawan wajib melakukan pencatatan kehadiran..."
-      }
-    ]
-  }
-}
 ```
 
 ---
@@ -156,31 +163,50 @@ curl -X POST http://localhost:3000/v1/chat \
 
 ```text
 ai-gateway/
-├── data/                       # Document storage directory
+├── data/                       # Ingested document storage
+├── public/                     # Modular Vanilla ES Modules Frontend
+│   ├── css/
+│   │   ├── tokens.css          # Supabase-style dark theme & design tokens
+│   │   ├── layout.css          # Shell grid, topbar & expandable sidebar
+│   │   └── components.css      # Tables, badges, modals, stars & buttons
+│   ├── js/
+│   │   ├── app.js              # Tab router & app controller
+│   │   ├── api.js              # REST API client
+│   │   ├── components/
+│   │   │   └── modal.js        # Reusable modal & toast dialogs
+│   │   └── pages/
+│   │       ├── overview.js     # Analytics & throughput metrics
+│   │       ├── runs.js         # Live audit table & rating buttons
+│   │       ├── jobs.js         # Knowledge tenant definitions
+│   │       └── playground.js   # Interactive chat tester & citation viewer
+│   └── index.html              # Clean single-page application shell (<130 lines)
 ├── src/
-│   ├── scripts/
-│   │   ├── initDb.js           # Database & pgvector HNSW index migration
-│   │   └── ingestSample.js     # Demo document creation & ingestion runner
-│   ├── services/
-│   │   ├── jdihChat.js         # RAG query search & LLM synthesis service
-│   │   ├── jdihIngestion.js    # Structure-aware chunking & embedding pipeline
-│   │   └── mistral.js          # Mistral API client wrapper with retry handling
 │   ├── db.js                   # PostgreSQL connection pool
-│   └── server.js               # Express application entrypoint
-├── docker-compose.yml          # pgvector service configuration
+│   ├── server.js               # Express API gateway & static server
+│   ├── scripts/
+│   │   ├── initDb.js           # Database migration (pgvector, logs, audit tables)
+│   │   └── ingestSample.js     # Demo document creation & ingestion runner
+│   └── services/
+│       ├── chatLogService.js   # Session persistence & human feedback handler
+│       ├── evaluatorService.js # LLM-as-a-Judge faithfulness scoring
+│       ├── jdihChat.js         # Vector search & RAG synthesis
+│       ├── jdihIngestion.js    # Structure-aware chunking & embedding pipeline
+│       ├── mistral.js          # Mistral API wrapper with rate-limit retry
+│       └── reasoningEngine.js  # Intent classification & L1 security guardrails
+├── docker-compose.yml          # PostgreSQL 16 + pgvector container
 ├── package.json
 └── README.md
 ```
 
 ---
 
-## 🗺 Production Roadmap & Scaling Considerations
+## 🗺 Production Scaling Roadmap
 
-1. **Decoupled Document Ingestion Worker**:
-   - For high-volume processing, offload PDF parsing and OCR to an asynchronous background worker using [Unstructured.io](https://unstructured.io/) or AWS Textract/Lambda.
-2. **Enterprise Cloud Migration (AWS Bedrock)**:
-   - Replace Mistral embeddings/chat with Amazon Bedrock Knowledge Bases and Claude 3.5 Sonnet without altering the gateway client contract.
-3. **Multi-Agent & Tool Calling (HC Use Case)**:
-   - Implement Mistral / Claude Tool Calling to securely query read-only PostgreSQL replicas for employee-specific records (e.g., remaining leave balances).
-4. **Guardrails & Evaluation**:
-   - Integrate PII redaction and prompt injection guards (e.g., Bedrock Guardrails / NeMo Guardrails).
+1. **Decoupled Document Ingestion**:
+   - Offload heavy PDF/OCR parsing to an asynchronous background worker using **Unstructured.io** or AWS Textract.
+2. **AWS Bedrock Integration**:
+   - Replace Mistral embeddings/chat with **Amazon Bedrock Knowledge Bases** and **Claude 3.5 Sonnet** while keeping the exact same gateway API contracts.
+3. **HC Tool Calling**:
+   - Implement Mistral / Claude Function Calling against read-only PostgreSQL replicas for employee-specific records.
+4. **Enhanced Semantic Routing**:
+   - Upgrade L1 Regex Guardrails to an embedding-based Semantic Router or Small Language Model (SLM) for intent classification.
