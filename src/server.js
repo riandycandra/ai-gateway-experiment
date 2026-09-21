@@ -6,6 +6,8 @@ import { guardrailCheck, planUserIntent } from './services/reasoningEngine.js';
 import { saveChatLog, getSessionHistory, saveHumanFeedback } from './services/chatLogService.js';
 import { evaluateChatLogWithJudge } from './services/evaluatorService.js';
 
+import { pool } from './db.js';
+
 dotenv.config();
 
 const app = express();
@@ -13,6 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
 
 // Health Check
 app.get('/health', (req, res) => {
@@ -187,6 +190,74 @@ app.post('/v1/eval/judge', async (req, res) => {
 
     const evaluation = await evaluateChatLogWithJudge(chat_log_id);
     return res.json({ success: true, data: evaluation });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Endpoint: Get all chat logs with evaluations (for Runs page)
+ */
+app.get('/v1/chat/logs', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit || '50', 10);
+    const query = `
+      SELECT 
+        l.id,
+        l.session_id,
+        l.app,
+        l.user_id,
+        l.user_message,
+        l.ai_response,
+        l.intent,
+        l.citations,
+        l.latency_ms,
+        l.created_at,
+        e.id as eval_id,
+        e.rating,
+        e.human_feedback,
+        e.llm_judge_score,
+        e.llm_judge_reasoning
+      FROM chat_logs l
+      LEFT JOIN audit_evaluations e ON e.chat_log_id = l.id
+      ORDER BY l.created_at DESC
+      LIMIT $1;
+    `;
+    const { rows } = await pool.query(query, [limit]);
+    return res.json({ success: true, count: rows.length, data: rows });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Endpoint: Get aggregated analytics stats (for Overview page)
+ */
+app.get('/v1/analytics/stats', async (req, res) => {
+  try {
+    const statsQuery = `
+      SELECT 
+        COUNT(*)::int as total_runs,
+        COALESCE(ROUND(AVG(latency_ms)), 0)::int as avg_latency_ms,
+        COUNT(CASE WHEN intent != 'MALICIOUS_ATTEMPT' THEN 1 END)::int as success_runs,
+        COUNT(CASE WHEN intent = 'MALICIOUS_ATTEMPT' THEN 1 END)::int as blocked_runs
+      FROM chat_logs;
+    `;
+    const { rows } = await pool.query(statsQuery);
+    const stats = rows[0];
+
+    const total = stats.total_runs || 0;
+    const successRate = total > 0 ? ((stats.success_runs / total) * 100).toFixed(1) : '100.0';
+
+    return res.json({
+      success: true,
+      data: {
+        totalRuns: stats.total_runs,
+        avgLatencyMs: stats.avg_latency_ms,
+        successRate: `${successRate}%`,
+        blockedRuns: stats.blocked_runs,
+      }
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

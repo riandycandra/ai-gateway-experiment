@@ -1,0 +1,80 @@
+/* ---------------------------------------------------------------
+   Design Tokens & Supabase-inspired Dark Palette
+--------------------------------------------------------------- */
+:root {
+  --bg: #171717;
+  --panel: #1c1c1c;
+  --panel-2: #232323;
+  --panel-3: #2a2a2a;
+  --border: #2e2e2e;
+  --border-strong: #3e3e3e;
+  --fg: #ededed;
+  --fg-2: #b4b4b4;
+  --fg-3: #7c7c7c;
+  --brand: #3ecf8e;
+  --brand-2: #24b47e;
+  --brand-dim: rgba(62, 207, 142, 0.10);
+  --warn: #f5a623;
+  --warn-dim: rgba(245, 166, 35, 0.10);
+  --danger: #f56565;
+  --danger-dim: rgba(245, 101, 101, 0.10);
+  --radius: 6px;
+  --rail: 56px;
+  --nav: 232px;
+  --top: 48px;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+::selection {
+  background: rgba(62, 207, 142, 0.28);
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 99px;
+  border: 3px solid var(--bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #454545;
+}
