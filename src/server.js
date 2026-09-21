@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { askJDIHQuestion } from './services/jdihChat.js';
+import { askJDIHQuestion, askJDIHQuestionStream } from './services/jdihChat.js';
 import { guardrailCheck, planUserIntent } from './services/reasoningEngine.js';
 import { saveChatLog, getSessionHistory, saveHumanFeedback } from './services/chatLogService.js';
 import { evaluateChatLogWithJudge } from './services/evaluatorService.js';
@@ -138,6 +138,111 @@ app.post('/v1/chat', async (req, res) => {
       error: 'Internal Server Error',
       details: error.message,
     });
+  }
+});
+
+/**
+ * Streaming Chat Endpoint (Server-Sent Events / SSE)
+ */
+app.post('/v1/chat/stream', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { app: clientApp, message, session_id, user_id } = req.body;
+    const sessionId = session_id || `sess_${Date.now()}`;
+
+    if (!message) {
+      return res.status(400).json({ error: 'Field "message" is required.' });
+    }
+
+    // 1. Guardrail Check
+    const guardrail = guardrailCheck(message);
+    if (!guardrail.isSafe) {
+      await saveChatLog({
+        sessionId,
+        app: clientApp || 'unknown',
+        userId: user_id,
+        userMessage: message,
+        aiResponse: guardrail.reason,
+        intent: 'MALICIOUS_ATTEMPT',
+        latencyMs: Date.now() - startTime,
+      });
+
+      return res.status(403).json({
+        success: false,
+        blocked: true,
+        error: guardrail.reason,
+      });
+    }
+
+    // 2. Reasoning Engine
+    const plan = planUserIntent(message, clientApp);
+
+    // Fast-path: Sapaan (langsung kirim via SSE dan selesai)
+    if (plan.action === 'DIRECT_REPLY') {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      res.write(`data: ${JSON.stringify({ type: 'meta', intent: plan.intent, citations: [] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'token', token: plan.directResponse })}\n\n`);
+
+      const log = await saveChatLog({
+        sessionId,
+        app: clientApp || 'general',
+        userId: user_id,
+        userMessage: message,
+        aiResponse: plan.directResponse,
+        intent: plan.intent,
+        latencyMs: Date.now() - startTime,
+      });
+
+      res.write(`data: ${JSON.stringify({ type: 'done', chatLogId: log.id, latencyMs: log.latency_ms })}\n\n`);
+      return res.end();
+    }
+
+    if (clientApp !== 'jdih') {
+      return res.status(400).json({ error: 'Streaming only supported for "jdih" at this stage.' });
+    }
+
+    // 3. Set SSE Headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const { citations, stream } = await askJDIHQuestionStream(message);
+
+    // Kirim event meta (citations & intent) terlebih dahulu
+    res.write(`data: ${JSON.stringify({ type: 'meta', intent: plan.intent, citations })}\n\n`);
+
+    let fullAnswer = '';
+    for await (const token of stream) {
+      fullAnswer += token;
+      res.write(`data: ${JSON.stringify({ type: 'token', token })}\n\n`);
+    }
+
+    // 4. Save to chat_logs after streaming finishes
+    const latencyMs = Date.now() - startTime;
+    const log = await saveChatLog({
+      sessionId,
+      app: 'jdih',
+      userId: user_id,
+      userMessage: message,
+      aiResponse: fullAnswer,
+      intent: plan.intent,
+      citations,
+      latencyMs,
+    });
+
+    res.write(`data: ${JSON.stringify({ type: 'done', chatLogId: log.id, latencyMs })}\n\n`);
+    res.end();
+  } catch (error) {
+    console.error('Streaming error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message });
+    } else {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+      res.end();
+    }
   }
 });
 

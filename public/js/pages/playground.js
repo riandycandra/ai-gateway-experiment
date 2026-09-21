@@ -59,7 +59,7 @@ async function handleSend() {
   const chatContainer = document.getElementById('chatMessages');
   const inspector = document.getElementById('inspectorContent');
 
-  // Append user message
+  // 1. Append user message bubble
   chatContainer.innerHTML += `
     <div style="align-self: flex-end; background: var(--brand-dim); border: 1px solid rgba(62,207,142,0.3); padding: 10px 14px; border-radius: 6px; font-size: 13px; max-width: 80%;">
       ${escapeHtml(message)}
@@ -68,69 +68,128 @@ async function handleSend() {
   input.value = '';
   chatContainer.scrollTop = chatContainer.scrollHeight;
 
-  // Placeholder thinking message
-  const loadingId = `load_${Date.now()}`;
+  // 2. Create AI bubble with streaming cursor
+  const aiBubbleId = `ai_msg_${Date.now()}`;
   chatContainer.innerHTML += `
-    <div id="${loadingId}" style="align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); padding: 10px 14px; border-radius: 6px; font-size: 13px; color: var(--fg-3);">
-      Thinking & searching knowledge base...
+    <div id="${aiBubbleId}" style="align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-width: 85%;">
+      <span class="stream-text">Thinking & searching knowledge base...</span><span class="stream-cursor" style="display:inline-block; width:6px; height:14px; background:var(--brand); margin-left:3px; vertical-align:middle; animation:blink 0.8s infinite;"></span>
     </div>
   `;
   chatContainer.scrollTop = chatContainer.scrollHeight;
 
   try {
-    const res = await api.sendChat({
-      app: 'jdih',
-      message,
-      userId: localStorage.getItem('userEmail') || 'dana@northwind.co',
+    const response = await fetch('/v1/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app: 'jdih',
+        message,
+        user_id: localStorage.getItem('userEmail') || 'dana@northwind.co',
+      }),
     });
 
-    document.getElementById(loadingId)?.remove();
-
-    if (!res.success) {
-      chatContainer.innerHTML += `
-        <div style="align-self: flex-start; background: var(--danger-dim); border: 1px solid rgba(245,101,101,0.3); color: var(--danger); padding: 10px 14px; border-radius: 6px; font-size: 13px;">
-          <strong>Blocked:</strong> ${escapeHtml(res.error || 'Request blocked by safety guardrail.')}
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => ({}));
+      document.getElementById(aiBubbleId).innerHTML = `
+        <div style="color: var(--danger);">
+          <strong>Blocked / Error:</strong> ${escapeHtml(errJson.error || 'Failed to process request.')}
         </div>
       `;
       return;
     }
 
-    const answer = res.data?.answer || '';
-    chatContainer.innerHTML += `
-      <div style="align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; max-width: 85%;">
-        ${escapeHtml(answer)}
-      </div>
-    `;
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let accumulatedText = '';
+    let isFirstToken = true;
 
-    // Update Inspector
-    const citations = res.data?.citations || [];
-    inspector.innerHTML = `
-      <div style="margin-bottom: 12px;">
-        <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase;">Run ID & Intent</div>
-        <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
-          <span class="mono strong">#${res.chatLogId || 'N/A'}</span>
-          <span class="badge green">${res.intent || 'RAG'}</span>
-        </div>
-      </div>
-      <div style="margin-bottom: 12px;">
-        <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase;">Latency</div>
-        <div class="mono" style="color: var(--brand); font-size: 16px; margin-top: 2px;">${res.latencyMs} ms</div>
-      </div>
-      <div>
-        <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase; margin-bottom: 6px;">Citations Retrieved (${citations.length})</div>
-        ${citations.map(c => `
-          <div style="background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 11.5px;">
-            <div style="font-weight: 500; color: var(--brand);">${escapeHtml(c.heading || '')}</div>
-            <div style="color: var(--fg-3); margin-top: 2px;">Sim: ${c.similarityScore}</div>
-          </div>
-        `).join('') || '<p style="color: var(--fg-3); font-size: 12px;">No citations.</p>'}
-      </div>
-    `;
+    const streamTextElem = document.querySelector(`#${aiBubbleId} .stream-text`);
+    const cursorElem = document.querySelector(`#${aiBubbleId} .stream-cursor`);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop(); // Sisa buffer yang belum selesai
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const dataStr = line.replace(/^data: /, '').trim();
+        if (!dataStr) continue;
+
+        try {
+          const payload = JSON.parse(dataStr);
+
+          // Event Meta (Citations & Intent)
+          if (payload.type === 'meta') {
+            updateInspectorMeta(payload.intent, payload.citations);
+          }
+
+          // Event Token (Teks baru dari LLM)
+          if (payload.type === 'token') {
+            if (isFirstToken) {
+              streamTextElem.textContent = '';
+              isFirstToken = false;
+            }
+            accumulatedText += payload.token;
+            streamTextElem.textContent = accumulatedText;
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+
+          // Event Done (Selesai & tercatat di database)
+          if (payload.type === 'done') {
+            cursorElem?.remove();
+            updateInspectorDone(payload.chatLogId, payload.latencyMs);
+          }
+        } catch (e) {
+          // ignore parsing error for chunk fragments
+        }
+      }
+    }
+
+    cursorElem?.remove();
 
   } catch (err) {
-    document.getElementById(loadingId)?.remove();
-    showToast(`Error: ${err.message}`);
+    document.getElementById(aiBubbleId).innerHTML = `<span style="color: var(--danger);">Error: ${escapeHtml(err.message)}</span>`;
+    showToast(`Streaming failed: ${err.message}`);
+  }
+}
+
+function updateInspectorMeta(intent, citations = []) {
+  const inspector = document.getElementById('inspectorContent');
+  if (!inspector) return;
+
+  inspector.innerHTML = `
+    <div style="margin-bottom: 12px;">
+      <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase;">Intent</div>
+      <div style="margin-top: 4px;">
+        <span class="badge green">${intent || 'RAG'}</span>
+      </div>
+    </div>
+    <div style="margin-bottom: 12px;">
+      <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase;">Latency</div>
+      <div class="mono" id="inspectorLatency" style="color: var(--warn); font-size: 15px; margin-top: 2px;">Streaming...</div>
+    </div>
+    <div>
+      <div style="font-size: 11px; color: var(--fg-3); text-transform: uppercase; margin-bottom: 6px;">Citations Retrieved (${citations.length})</div>
+      ${citations.map(c => `
+        <div style="background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 11.5px;">
+          <div style="font-weight: 500; color: var(--brand);">${escapeHtml(c.heading || '')}</div>
+          <div style="color: var(--fg-3); margin-top: 2px;">Sim: ${c.similarityScore}</div>
+        </div>
+      `).join('') || '<p style="color: var(--fg-3); font-size: 12px;">No citations.</p>'}
+    </div>
+  `;
+}
+
+function updateInspectorDone(chatLogId, latencyMs) {
+  const latElem = document.getElementById('inspectorLatency');
+  if (latElem) {
+    latElem.textContent = `${latencyMs} ms`;
+    latElem.style.color = 'var(--brand)';
   }
 }
 

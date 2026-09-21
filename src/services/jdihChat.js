@@ -1,5 +1,5 @@
 import { pool } from '../db.js';
-import { generateEmbeddings, chatCompletion } from './mistral.js';
+import { generateEmbeddings, chatCompletion, chatCompletionStream } from './mistral.js';
 
 /**
  * Service untuk menjawab pertanyaan JDIH menggunakan RAG (Retrieval-Augmented Generation)
@@ -30,8 +30,6 @@ export async function askJDIHQuestion(userQuestion, limit = 4) {
 
   const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
 
-  console.log(relevantChunks);
-
   if (relevantChunks.length === 0) {
     return {
       answer: "Maaf, belum ada dokumen peraturan yang tersimpan di dalam basis pengetahuan JDIH.",
@@ -45,8 +43,6 @@ export async function askJDIHQuestion(userQuestion, limit = 4) {
       return `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`;
     })
     .join('\n\n---\n\n');
-
-  console.log(contextText);
 
   // 4. Susun System Prompt & User Message untuk LLM
   const messages = [
@@ -84,5 +80,71 @@ ${contextText}
       snippet: c.chunk_text.slice(0, 150) + '...',
       fullText: c.chunk_text,
     })),
+  };
+}
+
+/**
+ * Streaming version of askJDIHQuestion
+ */
+export async function askJDIHQuestionStream(userQuestion, limit = 4) {
+  const [questionVector] = await generateEmbeddings([userQuestion]);
+  const vectorStr = JSON.stringify(questionVector);
+
+  const searchQuery = `
+    SELECT 
+      c.id,
+      c.heading,
+      c.chunk_text,
+      d.title as document_title,
+      d.document_number,
+      1 - (c.embedding <=> $1::vector) as similarity
+    FROM jdih_chunks c
+    JOIN jdih_documents d ON c.document_id = d.id
+    ORDER BY c.embedding <=> $1::vector ASC
+    LIMIT $2;
+  `;
+
+  const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
+
+  const citations = relevantChunks.map(c => ({
+    documentTitle: c.document_title,
+    documentNumber: c.document_number,
+    heading: c.heading,
+    similarityScore: parseFloat(c.similarity).toFixed(4),
+    snippet: c.chunk_text.slice(0, 150) + '...',
+    fullText: c.chunk_text,
+  }));
+
+  const contextText = relevantChunks
+    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
+    .join('\n\n---\n\n');
+
+  const messages = [
+    {
+      role: 'system',
+      content: `Kamu adalah Asisten AI Resmi JDIH (Jaringan Dokumentasi dan Informasi Hukum) Perusahaan.
+Tugasmu adalah menjawab pertanyaan pengguna HANYA berdasarkan referensi peraturan dan ketentuan hukum perusahaan yang diberikan di bawah ini.
+
+Petunjuk Penting:
+1. Bersikaplah profesional, jelas, dan lugas.
+2. Selalu sebutkan dasar hukum, bab, pasal, atau nomor dokumen yang menjadi dasar jawabanmu (contoh: "Berdasarkan Pasal 15 Peraturan Perusahaan No. 01/2024...").
+3. Jika jawaban tidak ditemukan di dalam teks referensi, katakan dengan jujur bahwa informasi tersebut tidak tercantum dalam dokumen peraturan yang tersedia saat ini, jangan mengarang atau berhalusinasi.
+
+Berikut adalah teks referensi peraturan yang relevan:
+====================
+${contextText}
+====================`,
+    },
+    {
+      role: 'user',
+      content: userQuestion,
+    },
+  ];
+
+  const stream = chatCompletionStream(messages);
+
+  return {
+    citations,
+    stream,
   };
 }

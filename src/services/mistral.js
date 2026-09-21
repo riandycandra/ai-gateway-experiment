@@ -64,3 +64,25 @@ export async function chatCompletion(messages) {
 
   return response.choices[0].message.content;
 }
+
+/**
+ * Stream Chat with Mistral LLM (Server-Sent Events / SSE)
+ * @param {Array<{role: string, content: string}>} messages
+ * @returns {AsyncGenerator<string>}
+ */
+export async function* chatCompletionStream(messages) {
+  await sleep(500);
+
+  const stream = await mistralClient.chat.stream({
+    model: 'open-mistral-7b',
+    messages,
+    temperature: 0.2,
+  });
+
+  for await (const chunk of stream) {
+    const token = chunk.data.choices[0]?.delta?.content;
+    if (token) {
+      yield token;
+    }
+  }
+}
