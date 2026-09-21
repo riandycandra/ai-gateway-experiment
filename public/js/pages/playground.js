@@ -131,17 +131,24 @@ async function handleSend() {
           // Event Token (Teks baru dari LLM)
           if (payload.type === 'token') {
             if (isFirstToken) {
-              streamTextElem.textContent = '';
+              streamTextElem.innerHTML = '';
               isFirstToken = false;
             }
             accumulatedText += payload.token;
-            streamTextElem.textContent = accumulatedText;
+            if (window.marked) {
+              streamTextElem.innerHTML = window.marked.parse(accumulatedText);
+            } else {
+              streamTextElem.textContent = accumulatedText;
+            }
             chatContainer.scrollTop = chatContainer.scrollHeight;
           }
 
           // Event Done (Selesai & tercatat di database)
           if (payload.type === 'done') {
             cursorElem?.remove();
+            if (window.marked) {
+              streamTextElem.innerHTML = window.marked.parse(accumulatedText);
+            }
             updateInspectorDone(payload.chatLogId, payload.latencyMs);
           }
         } catch (e) {
@@ -151,6 +158,9 @@ async function handleSend() {
     }
 
     cursorElem?.remove();
+    if (window.marked) {
+      streamTextElem.innerHTML = window.marked.parse(accumulatedText);
+    }
 
   } catch (err) {
     document.getElementById(aiBubbleId).innerHTML = `<span style="color: var(--danger);">Error: ${escapeHtml(err.message)}</span>`;
