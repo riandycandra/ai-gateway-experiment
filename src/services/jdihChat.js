@@ -6,9 +6,19 @@ import { generateEmbeddings, chatCompletion, chatCompletionStream } from './mist
  * 1. Pertanyaan user di-embed jadi vektor
  * 2. Cari top-K potongan pasal terdekat di PostgreSQL via cosine distance (<=>)
  * 3. Kirim potongan pasal + pertanyaan ke LLM Mistral
+ * 4. Record hierarchical spans ke Langfuse jika parentTrace disediakan
  */
-export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = []) {
-  // 1. Generate embedding untuk pertanyaan user
+export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [], parentTrace = null) {
+  // 1. Span Retrieval di Langfuse
+  const retrievalSpan = parentTrace && typeof parentTrace.span === 'function'
+    ? parentTrace.span({
+        name: 'vector-retrieval-pgvector',
+        input: { query: userQuestion, limit },
+        metadata: { targetTable: 'jdih_chunks', indexType: 'hnsw_cosine' },
+      })
+    : null;
+
+  // Generate embedding untuk pertanyaan user
   const [questionVector] = await generateEmbeddings([userQuestion]);
   const vectorStr = JSON.stringify(questionVector);
 
@@ -29,6 +39,28 @@ export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [])
 
   const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
 
+  const citations = relevantChunks.map(c => ({
+    documentTitle: c.document_title,
+    documentNumber: c.document_number,
+    heading: c.heading,
+    similarityScore: parseFloat(c.similarity).toFixed(4),
+    snippet: c.chunk_text.slice(0, 150) + '...',
+    fullText: c.chunk_text,
+  }));
+
+  if (retrievalSpan) {
+    retrievalSpan.end({
+      output: {
+        retrievedCount: relevantChunks.length,
+        citations: citations.map(c => ({
+          documentTitle: c.documentTitle,
+          heading: c.heading,
+          similarityScore: c.similarityScore,
+        })),
+      },
+    });
+  }
+
   if (relevantChunks.length === 0) {
     return {
       answer: "Maaf, belum ada dokumen peraturan yang tersimpan di dalam basis pengetahuan JDIH.",
@@ -43,26 +75,42 @@ export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [])
   // Format multi-turn messages
   const messages = buildMessagesPayload(contextText, userQuestion, chatHistory);
 
+  // 3. Generation Span di Langfuse
+  const generation = parentTrace && typeof parentTrace.generation === 'function'
+    ? parentTrace.generation({
+        name: 'mistral-rag-synthesis',
+        model: 'mistral-small-latest',
+        input: messages,
+      })
+    : null;
+
   // 5. Generate jawaban menggunakan Mistral
   const answer = await chatCompletion(messages);
 
+  if (generation) {
+    generation.end({
+      output: answer,
+    });
+  }
+
   return {
     answer,
-    citations: relevantChunks.map(c => ({
-      documentTitle: c.document_title,
-      documentNumber: c.document_number,
-      heading: c.heading,
-      similarityScore: parseFloat(c.similarity).toFixed(4),
-      snippet: c.chunk_text.slice(0, 150) + '...',
-      fullText: c.chunk_text,
-    })),
+    citations,
   };
 }
 
 /**
- * Streaming version of askJDIHQuestion with Multi-Turn Memory
+ * Streaming version of askJDIHQuestion with Multi-Turn Memory and Langfuse Tracing
  */
-export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory = []) {
+export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory = [], parentTrace = null) {
+  const retrievalSpan = parentTrace && typeof parentTrace.span === 'function'
+    ? parentTrace.span({
+        name: 'vector-retrieval-pgvector-stream',
+        input: { query: userQuestion, limit },
+        metadata: { targetTable: 'jdih_chunks', indexType: 'hnsw_cosine' },
+      })
+    : null;
+
   const [questionVector] = await generateEmbeddings([userQuestion]);
   const vectorStr = JSON.stringify(questionVector);
 
@@ -91,17 +139,40 @@ export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory
     fullText: c.chunk_text,
   }));
 
+  if (retrievalSpan) {
+    retrievalSpan.end({
+      output: {
+        retrievedCount: relevantChunks.length,
+        citations: citations.map(c => ({
+          documentTitle: c.documentTitle,
+          heading: c.heading,
+          similarityScore: c.similarityScore,
+        })),
+      },
+    });
+  }
+
   const contextText = relevantChunks
     .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
     .join('\n\n---\n\n');
 
   // Format multi-turn messages
   const messages = buildMessagesPayload(contextText, userQuestion, chatHistory);
+
+  const generation = parentTrace && typeof parentTrace.generation === 'function'
+    ? parentTrace.generation({
+        name: 'mistral-rag-stream-synthesis',
+        model: 'mistral-small-latest',
+        input: messages,
+      })
+    : null;
+
   const stream = chatCompletionStream(messages);
 
   return {
     citations,
     stream,
+    generation,
   };
 }
 
