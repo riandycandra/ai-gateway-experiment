@@ -1,0 +1,16 @@
+[
+  {
+    "id": "82386a2e-6686-4268-9c2f-94fee45a15b6",
+    "chat_log_id": "a05f4baa-d0bb-4b55-86c6-bce8058007a7",
+    "llm_judge_score": 2,
+    "llm_judge_reasoning": "{\"score\":2,\"faithfulness_score\":1,\"answer_relevance_score\":3,\"context_relevance_score\":1,\"faithfulness\":\"LOW\",\"relevance\":\"MEDIUM\",\"context_relevance\":\"LOW\",\"reasoning\":\"Jawaban AI mengandung **hallusinasi parah** karena menampilkan kutipan palsu dari dokumen yang tidak ada (tidak ada teks referensi yang valid). Meskipun jawaban relevan secara umum, tidak ada dasar factual yang mendukung klaim tersebut.\"}",
+    "created_at": "2026-09-23T15:40:10.399Z"
+  },
+  {
+    "id": "f9913f6a-3925-40ff-b4c9-62055d14d56a",
+    "chat_log_id": "4590e89a-cf85-46f9-92fb-0091dd6c99d2",
+    "llm_judge_score": 2,
+    "llm_judge_reasoning": "{\"score\":2,\"faithfulness_score\":1,\"answer_relevance_score\":3,\"context_relevance_score\":1,\"faithfulness\":\"LOW\",\"relevance\":\"MEDIUM\",\"context_relevance\":\"LOW\",\"reasoning\":\"Jawaban AI tidak dapat menilai konsekuensi karena tidak ada dokumen referensi yang relevan atau kutipan peraturan yang ditarik. Jawaban hanya mengulang ketiadaan dokumen, bukan memberikan analisis atau penjelasan alternatif yang dapat dipertanggungjawabkan.\"}",
+    "created_at": "2026-09-23T15:40:38.419Z"
+  }
+]

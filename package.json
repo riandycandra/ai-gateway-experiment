@@ -13,11 +13,14 @@
   "license": "ISC",
   "dependencies": {
     "@mistralai/mistralai": "^2.7.0",
+    "@qdrant/js-client-rest": "^1.19.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.1",
     "express": "^5.2.1",
     "langfuse": "^3.39.2",
+    "multer": "^2.4.0",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2",
     "pg": "^8.23.0"
   }
 }

@@ -1,14 +1,15 @@
-import pg from 'pg';
-import dotenv from 'dotenv';
+/**
+ * Database module: PostgreSQL has been deprecated.
+ * Vector storage and retrieval has been fully migrated to Qdrant Cloud (src/services/qdrant.js).
+ * Chat logs are persisted locally in data/chat_logs.json (src/services/chatLogService.js).
+ */
 
-dotenv.config();
+export const pool = {
+  query: async () => {
+    console.warn('⚠️ Warning: PostgreSQL pool.query called, but PostgreSQL is deprecated. Vector search is now handled by Qdrant Cloud.');
+    return { rows: [] };
+  },
+  end: async () => {},
+};
 
-const { Pool } = pg;
-
-export const pool = new Pool({
-  host: process.env.PG_HOST || 'localhost',
-  port: parseInt(process.env.PG_PORT || '5432', 10),
-  user: process.env.PG_USER || 'ai_user',
-  password: process.env.PG_PASSWORD || 'ai_password',
-  database: process.env.PG_DATABASE || 'ai_gateway',
-});
+export default pool;

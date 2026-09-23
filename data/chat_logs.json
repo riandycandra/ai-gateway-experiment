@@ -1,0 +1,26 @@
+[
+  {
+    "id": "a05f4baa-d0bb-4b55-86c6-bce8058007a7",
+    "session_id": "sess_1790177782006",
+    "app": "jdih",
+    "user_id": "dana@northwind.co",
+    "user_message": "berapa jam kerja dalam sehari",
+    "ai_response": "Berdasarkan dokumen **Peraturan Perusahaan JDIH tentang Jam Kerja dan Istirahat**, **Pasal 3 (a)** menyatakan:\n\n> *\"Jam kerja normal dalam sehari adalah **8 (delapan) jam** untuk pegawai tetap.\"*\n\nJadi, **jam kerja normal dalam sehari adalah 8 jam** (sesuai **Peraturan Perusahaan JDIH tentang Jam Kerja dan Istirahat, Pasal 3(a)**).",
+    "intent": "JDIH_LEGAL",
+    "citations": [],
+    "latency_ms": 2455,
+    "created_at": "2026-09-23T15:40:06.972Z"
+  },
+  {
+    "id": "4590e89a-cf85-46f9-92fb-0091dd6c99d2",
+    "session_id": "sess_1790177782006",
+    "app": "jdih",
+    "user_id": "dana@northwind.co",
+    "user_message": "kalo telat apa konsekuensinya?",
+    "ai_response": "Berdasarkan dokumen yang tersedia, **tidak terdapat peraturan eksplisit** mengenai konsekuensi atau sanksi untuk pegawai yang **telat** dalam **Peraturan Perusahaan JDIH tentang Jam Kerja dan Istirahat** maupun dokumen lainnya yang telah disediakan.\n\nOleh karena itu, **peraturan perusahaan yang tersedia saat ini tidak mengatur hal tersebut secara jelas**.\n\nJika Anda memerlukan informasi lebih lanjut, silakan merujuk pada:\n- **Peraturan Internal Lainnya** (misalnya Peraturan Disiplin Pegawai atau Peraturan Kehadiran).\n- **Perjanjian Kerja Individu (PKI)** atau **Peraturan Internal Departemen HRD** yang mungkin mengatur hal ini.",
+    "intent": "JDIH_LEGAL",
+    "citations": [],
+    "latency_ms": 3346,
+    "created_at": "2026-09-23T15:40:35.348Z"
+  }
+]

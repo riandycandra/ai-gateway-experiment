@@ -1,6 +1,5 @@
 import { chatCompletion } from './mistral.js';
-import { pool } from '../db.js';
-import { getChatLogById } from './chatLogService.js';
+import { getChatLogById, saveJudgeEvaluation } from './chatLogService.js';
 import { sendTraceScore, flushLangfuse } from './langfuse.js';
 
 /**
@@ -82,18 +81,12 @@ ${log.ai_response}`,
     };
   }
 
-  // 1. Simpan hasil audit ke PostgreSQL lokal (audit_evaluations)
-  const query = `
-    INSERT INTO audit_evaluations (chat_log_id, llm_judge_score, llm_judge_reasoning)
-    VALUES ($1, $2, $3)
-    RETURNING id, chat_log_id, llm_judge_score, llm_judge_reasoning, created_at;
-  `;
-
-  const { rows } = await pool.query(query, [
+  // 1. Simpan hasil audit evaluasi
+  await saveJudgeEvaluation({
     chatLogId,
-    parsedResult.score || 5,
-    JSON.stringify(parsedResult),
-  ]);
+    score: parsedResult.score || 5,
+    reasoning: JSON.stringify(parsedResult),
+  });
 
   // 2. Kirim metrik ke Langfuse Cloud jika trace / traceId tersedia
   const activeTrace = trace;

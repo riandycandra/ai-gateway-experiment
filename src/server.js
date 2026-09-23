@@ -1,13 +1,22 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import { randomUUID } from 'crypto';
 import { askJDIHQuestion, askJDIHQuestionStream } from './services/jdihChat.js';
 import { guardrailCheck, planUserIntent } from './services/reasoningEngine.js';
-import { saveChatLog, getSessionHistory, saveHumanFeedback } from './services/chatLogService.js';
+import {
+  saveChatLog,
+  getSessionHistory,
+  saveHumanFeedback,
+  getAllChatLogsWithEvals,
+  getAnalyticsStats,
+} from './services/chatLogService.js';
 import { evaluateChatLogWithJudge, triggerBackgroundEvaluation } from './services/evaluatorService.js';
 import { createChatTrace, sendTraceScore, flushLangfuse, isLangfuseEnabled } from './services/langfuse.js';
-
-import { pool } from './db.js';
+import { partitionAndChunkPdf } from './services/unstructured.js';
+import { ensureCollection, upsertDocumentChunks, DEFAULT_COLLECTION } from './services/qdrant.js';
+import { generateEmbeddings } from './services/mistral.js';
 
 dotenv.config();
 
@@ -18,9 +27,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 }, // 30 MB max
+});
+
 // Health Check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'ai-gateway' });
+  res.json({ status: 'ok', service: 'ai-gateway', vectorDb: 'qdrant-cloud' });
 });
 
 /**
@@ -393,34 +407,115 @@ app.post('/v1/eval/judge', async (req, res) => {
 });
 
 /**
+ * Endpoint: Ingest PDF Document via Unstructured.io & Qdrant Cloud
+ * Accepts multipart/form-data:
+ * - file: PDF file buffer (required)
+ * - title: document title (optional)
+ * - document_number: e.g. "PER-01/2026" (optional)
+ * - category: e.g. "Peraturan Perusahaan" (optional)
+ */
+app.post('/v1/documents/upload', upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'File PDF wajib diunggah dengan form field "file".',
+      });
+    }
+
+    if (!req.file.originalname.toLowerCase().endsWith('.pdf')) {
+      return res.status(400).json({
+        success: false,
+        error: 'Format file tidak didukung. Harap unggah file dokumen berekstensi .pdf.',
+      });
+    }
+
+    const title = req.body.title || req.file.originalname.replace(/\.pdf$/i, '');
+    const documentNumber = req.body.document_number || 'N/A';
+    const category = req.body.category || 'Peraturan Perusahaan';
+
+    console.log(`\n📥 [Upload API] Menerima dokumen: "${title}" (${(req.file.size / 1024).toFixed(1)} KB)`);
+    console.log(`   Nomor: ${documentNumber} | Kategori: ${category}`);
+
+    // 1. Pastikan Collection Qdrant siap (1024-dim, Cosine)
+    await ensureCollection(DEFAULT_COLLECTION, 1024);
+
+    // 2. Partisi & Smart Chunking via Unstructured.io Cloud
+    const chunks = await partitionAndChunkPdf(req.file.buffer, req.file.originalname);
+
+    if (!chunks.length) {
+      return res.status(422).json({
+        success: false,
+        error: 'Unstructured.io tidak menemukan teks yang dapat dipartisi dari dokumen PDF ini.',
+      });
+    }
+
+    // 3. Batch Embedding via Mistral AI
+    console.log(`🤖 Menghasilkan embeddings Mistral untuk ${chunks.length} chunks...`);
+    const textsToEmbed = chunks.map(c => `${c.heading}: ${c.text}`);
+    const allEmbeddings = [];
+    const batchSize = 16;
+
+    for (let i = 0; i < chunks.length; i += batchSize) {
+      const textBatch = textsToEmbed.slice(i, i + batchSize);
+      const batchEmbeddings = await generateEmbeddings(textBatch);
+      allEmbeddings.push(...batchEmbeddings);
+      console.log(`   Processed batch ${i + 1} - ${Math.min(i + batchSize, chunks.length)}`);
+    }
+
+    // 4. Siapkan Point Qdrant
+    const points = chunks.map((chunk, index) => ({
+      id: randomUUID(),
+      vector: allEmbeddings[index],
+      payload: {
+        documentTitle: title,
+        documentNumber: documentNumber,
+        category: category,
+        heading: chunk.heading,
+        text: chunk.text,
+        pageNumber: chunk.pageNumber,
+        type: chunk.type,
+        sourceFile: req.file.originalname,
+        uploadedAt: new Date().toISOString(),
+      },
+    }));
+
+    // 5. Simpan ke Qdrant Cloud
+    console.log(`☁️ Menyimpan ${points.length} points ke Qdrant Cloud [${DEFAULT_COLLECTION}]...`);
+    await upsertDocumentChunks(DEFAULT_COLLECTION, points);
+    const durationMs = Date.now() - startTime;
+    console.log(`🎉 Ingestion selesai dalam ${durationMs}ms`);
+
+    return res.json({
+      success: true,
+      message: 'Dokumen berhasil dipartisi oleh Unstructured.io Cloud dan disimpan di Qdrant Cloud.',
+      document: {
+        title,
+        documentNumber,
+        category,
+        sourceFile: req.file.originalname,
+        totalChunks: chunks.length,
+      },
+      qdrantCollection: DEFAULT_COLLECTION,
+      processingTimeMs: durationMs,
+    });
+  } catch (error) {
+    console.error('❌ Upload / Ingestion error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * Endpoint: Get all chat logs with evaluations (for Runs page)
  */
 app.get('/v1/chat/logs', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || '50', 10);
-    const query = `
-      SELECT 
-        l.id,
-        l.session_id,
-        l.app,
-        l.user_id,
-        l.user_message,
-        l.ai_response,
-        l.intent,
-        l.citations,
-        l.latency_ms,
-        l.created_at,
-        e.id as eval_id,
-        e.rating,
-        e.human_feedback,
-        e.llm_judge_score,
-        e.llm_judge_reasoning
-      FROM chat_logs l
-      LEFT JOIN audit_evaluations e ON e.chat_log_id = l.id
-      ORDER BY l.created_at DESC
-      LIMIT $1;
-    `;
-    const { rows } = await pool.query(query, [limit]);
+    const rows = await getAllChatLogsWithEvals(limit);
     return res.json({ success: true, count: rows.length, data: rows });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -432,36 +527,23 @@ app.get('/v1/chat/logs', async (req, res) => {
  */
 app.get('/v1/analytics/stats', async (req, res) => {
   try {
-    const statsQuery = `
-      SELECT 
-        COUNT(*)::int as total_runs,
-        COALESCE(ROUND(AVG(latency_ms)), 0)::int as avg_latency_ms,
-        COUNT(CASE WHEN intent != 'MALICIOUS_ATTEMPT' THEN 1 END)::int as success_runs,
-        COUNT(CASE WHEN intent = 'MALICIOUS_ATTEMPT' THEN 1 END)::int as blocked_runs
-      FROM chat_logs;
-    `;
-    const { rows } = await pool.query(statsQuery);
-    const stats = rows[0];
-
-    const total = stats.total_runs || 0;
-    const successRate = total > 0 ? ((stats.success_runs / total) * 100).toFixed(1) : '100.0';
-
+    const stats = await getAnalyticsStats();
     return res.json({
       success: true,
-      data: {
-        totalRuns: stats.total_runs,
-        avgLatencyMs: stats.avg_latency_ms,
-        successRate: `${successRate}%`,
-        blockedRuns: stats.blocked_runs,
-      }
+      data: stats,
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log(`🚀 AI Gateway Server running on http://localhost:${PORT}`);
+  try {
+    await ensureCollection(DEFAULT_COLLECTION, 1024);
+  } catch (e) {
+    console.warn('⚠️ Qdrant startup check note:', e.message);
+  }
 });
 
 server.on('error', (err) => {

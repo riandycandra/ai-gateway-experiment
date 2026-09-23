@@ -1,10 +1,10 @@
-import { pool } from '../db.js';
+import { searchChunks, DEFAULT_COLLECTION } from './qdrant.js';
 import { generateEmbeddings, chatCompletion, chatCompletionStream } from './mistral.js';
 
 /**
  * Service untuk menjawab pertanyaan JDIH menggunakan RAG (Retrieval-Augmented Generation)
- * 1. Pertanyaan user di-embed jadi vektor
- * 2. Cari top-K potongan pasal terdekat di PostgreSQL via cosine distance (<=>)
+ * 1. Pertanyaan user di-embed jadi vektor via Mistral
+ * 2. Cari top-K potongan pasal terdekat di Qdrant Cloud via Cosine Similarity
  * 3. Kirim potongan pasal + pertanyaan ke LLM Mistral
  * 4. Record hierarchical spans ke Langfuse jika parentTrace disediakan
  */
@@ -12,40 +12,31 @@ export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [],
   // 1. Span Retrieval di Langfuse
   const retrievalSpan = parentTrace && typeof parentTrace.span === 'function'
     ? parentTrace.span({
-        name: 'vector-retrieval-pgvector',
+        name: 'vector-retrieval-qdrant-cloud',
         input: { query: userQuestion, limit },
-        metadata: { targetTable: 'jdih_chunks', indexType: 'hnsw_cosine' },
+        metadata: { collection: DEFAULT_COLLECTION, indexType: 'hnsw_cosine' },
       })
     : null;
 
   // Generate embedding untuk pertanyaan user
   const [questionVector] = await generateEmbeddings([userQuestion]);
-  const vectorStr = JSON.stringify(questionVector);
 
-  // 2. Query ke PostgreSQL menggunakan cosine similarity operator (<=>)
-  const searchQuery = `
-    SELECT 
-      c.id,
-      c.heading,
-      c.chunk_text,
-      d.title as document_title,
-      d.document_number,
-      1 - (c.embedding <=> $1::vector) as similarity
-    FROM jdih_chunks c
-    JOIN jdih_documents d ON c.document_id = d.id
-    ORDER BY c.embedding <=> $1::vector ASC
-    LIMIT $2;
-  `;
-
-  const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
+  // 2. Query ke Qdrant Cloud menggunakan Cosine Similarity
+  let relevantChunks = [];
+  try {
+    relevantChunks = await searchChunks(DEFAULT_COLLECTION, questionVector, limit);
+  } catch (err) {
+    console.error('⚠️ Qdrant search error:', err.message);
+  }
 
   const citations = relevantChunks.map(c => ({
-    documentTitle: c.document_title,
-    documentNumber: c.document_number,
+    documentTitle: c.documentTitle,
+    documentNumber: c.documentNumber,
     heading: c.heading,
-    similarityScore: parseFloat(c.similarity).toFixed(4),
-    snippet: c.chunk_text.slice(0, 150) + '...',
-    fullText: c.chunk_text,
+    similarityScore: parseFloat(c.score).toFixed(4),
+    snippet: c.text.slice(0, 150) + '...',
+    fullText: c.text,
+    pageNumber: c.pageNumber,
   }));
 
   if (retrievalSpan) {
@@ -63,13 +54,13 @@ export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [],
 
   if (relevantChunks.length === 0) {
     return {
-      answer: "Maaf, belum ada dokumen peraturan yang tersimpan di dalam basis pengetahuan JDIH.",
+      answer: "Maaf, belum ada dokumen peraturan yang tersimpan di dalam basis pengetahuan JDIH Qdrant Cloud.",
       citations: [],
     };
   }
 
   const contextText = relevantChunks
-    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
+    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.documentTitle} (${chunk.documentNumber || 'N/A'}) - Hal ${chunk.pageNumber} - ${chunk.heading}]\n${chunk.text}`)
     .join('\n\n---\n\n');
 
   // Format multi-turn messages
@@ -105,38 +96,29 @@ export async function askJDIHQuestion(userQuestion, limit = 4, chatHistory = [],
 export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory = [], parentTrace = null) {
   const retrievalSpan = parentTrace && typeof parentTrace.span === 'function'
     ? parentTrace.span({
-        name: 'vector-retrieval-pgvector-stream',
+        name: 'vector-retrieval-qdrant-cloud-stream',
         input: { query: userQuestion, limit },
-        metadata: { targetTable: 'jdih_chunks', indexType: 'hnsw_cosine' },
+        metadata: { collection: DEFAULT_COLLECTION, indexType: 'hnsw_cosine' },
       })
     : null;
 
   const [questionVector] = await generateEmbeddings([userQuestion]);
-  const vectorStr = JSON.stringify(questionVector);
 
-  const searchQuery = `
-    SELECT 
-      c.id,
-      c.heading,
-      c.chunk_text,
-      d.title as document_title,
-      d.document_number,
-      1 - (c.embedding <=> $1::vector) as similarity
-    FROM jdih_chunks c
-    JOIN jdih_documents d ON c.document_id = d.id
-    ORDER BY c.embedding <=> $1::vector ASC
-    LIMIT $2;
-  `;
-
-  const { rows: relevantChunks } = await pool.query(searchQuery, [vectorStr, limit]);
+  let relevantChunks = [];
+  try {
+    relevantChunks = await searchChunks(DEFAULT_COLLECTION, questionVector, limit);
+  } catch (err) {
+    console.error('⚠️ Qdrant search stream error:', err.message);
+  }
 
   const citations = relevantChunks.map(c => ({
-    documentTitle: c.document_title,
-    documentNumber: c.document_number,
+    documentTitle: c.documentTitle,
+    documentNumber: c.documentNumber,
     heading: c.heading,
-    similarityScore: parseFloat(c.similarity).toFixed(4),
-    snippet: c.chunk_text.slice(0, 150) + '...',
-    fullText: c.chunk_text,
+    similarityScore: parseFloat(c.score).toFixed(4),
+    snippet: c.text.slice(0, 150) + '...',
+    fullText: c.text,
+    pageNumber: c.pageNumber,
   }));
 
   if (retrievalSpan) {
@@ -153,7 +135,7 @@ export async function askJDIHQuestionStream(userQuestion, limit = 4, chatHistory
   }
 
   const contextText = relevantChunks
-    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.document_title} (${chunk.document_number || 'N/A'}) - ${chunk.heading}]\n${chunk.chunk_text}`)
+    .map((chunk, idx) => `[Dokumen ${idx + 1}: ${chunk.documentTitle} (${chunk.documentNumber || 'N/A'}) - Hal ${chunk.pageNumber} - ${chunk.heading}]\n${chunk.text}`)
     .join('\n\n---\n\n');
 
   // Format multi-turn messages

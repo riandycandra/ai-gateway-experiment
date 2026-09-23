@@ -460,3 +460,66 @@ table.tbl td.strong {
   font-weight: 600;
   color: #fff;
 }
+
+/* ---------------------------------------------------------------
+   Document Ingestion & File Dropzone
+--------------------------------------------------------------- */
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 30px 20px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.015);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dropzone:hover, .dropzone.dragover {
+  border-color: var(--brand);
+  background: var(--brand-dim);
+}
+
+.dropzone-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  display: grid;
+  place-items: center;
+  margin: 0 auto 12px;
+  color: var(--brand);
+  transition: transform 0.2s ease, border-color 0.2s;
+}
+
+.dropzone:hover .dropzone-icon {
+  transform: translateY(-2px);
+  border-color: var(--brand);
+}
+
+.file-selected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--brand);
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.ingest-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+@media (max-width: 640px) {
+  .ingest-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
